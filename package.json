@@ -1,0 +1,9 @@
+{
+  "name": "wasteless-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI food demand and waste reduction platform",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
