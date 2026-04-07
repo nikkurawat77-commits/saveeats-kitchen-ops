@@ -1,9 +1,22 @@
 {
-  "name": "wasteless-ai",
+  "name": "freshmind",
   "version": "1.0.0",
   "private": true,
-  "description": "AI food demand and waste reduction platform",
+  "description": "FreshMind is an AI-powered kitchen and food waste tracking platform built with React, Framer Motion, Lucide, and Recharts.",
   "scripts": {
-    "start": "node server.js"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "framer-motion": "^12.23.24",
+    "lucide-react": "^0.542.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "recharts": "^3.1.2",
+    "vite": "^7.1.7"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.4"
   }
 }
