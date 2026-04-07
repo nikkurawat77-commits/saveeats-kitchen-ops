@@ -15,7 +15,8 @@ module.exports = async function handler(req, res) {
       liveRecipes: Boolean(process.env.ANTHROPIC_API_KEY),
       liveBilling: Boolean(process.env.STRIPE_SECRET_KEY),
       liveAuth: supabase.hasAuth,
-      liveWorkspace: supabase.hasWorkspacePersistence
+      liveWorkspace: supabase.hasWorkspacePersistence,
+      liveAppData: supabase.hasAppDataPersistence
     }
   });
 };

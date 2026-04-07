@@ -556,6 +556,54 @@ async function fetchServerWorkspace(accessToken) {
   return payload;
 }
 
+async function fetchServerAppData(accessToken) {
+  const response = await fetch("/api/app-data", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.detail || payload.error || "App data fetch failed");
+  }
+
+  return payload;
+}
+
+async function syncServerAppData(accessToken, snapshot) {
+  const response = await fetch("/api/app-data", {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      Authorization: `Bearer ${accessToken}`
+    },
+    body: JSON.stringify(snapshot)
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.detail || payload.error || "App data sync failed");
+  }
+
+  return payload;
+}
+
+function buildWasteBreakdown(foodItems) {
+  if (!foodItems.length) {
+    return seedWasteBreakdown();
+  }
+
+  const counts = foodItems.reduce((summary, item) => {
+    summary[item.category] = (summary[item.category] || 0) + 1;
+    return summary;
+  }, {});
+
+  return Object.entries(counts)
+    .map(([name, value]) => ({ name, value }))
+    .sort((left, right) => right.value - left.value);
+}
+
 function AnimatedCounter({ value, prefix = "", suffix = "", decimals = 0 }) {
   const ref = useRef(null);
   const inView = useInView(ref, { once: true, amount: 0.6 });
@@ -1367,7 +1415,7 @@ function DashboardHome({ currentUser, foodItems, savingsHistory, wasteBreakdown,
   );
 }
 
-function MyFoodPage({ foodItems, setFoodItems, addToast }) {
+function MyFoodPage({ foodItems, onAddFoodItem, onRemoveFoodItem, addToast }) {
   const [filter, setFilter] = useState("all");
   const [form, setForm] = useState({ name: "", category: "Vegetables", qty: "", expiry: isoFromDays(5) });
 
@@ -1377,16 +1425,13 @@ function MyFoodPage({ foodItems, setFoodItems, addToast }) {
       addToast("Missing details", "Add a name, quantity, and expiry date.");
       return;
     }
-    setFoodItems((current) => [
-      { id: makeId("food"), name: form.name.trim(), category: form.category, qty: form.qty.trim(), expiry: form.expiry, addedDate: isoFromDays(0), reminder: false },
-      ...current
-    ]);
+    onAddFoodItem({ id: makeId("food"), name: form.name.trim(), category: form.category, qty: form.qty.trim(), expiry: form.expiry, addedDate: isoFromDays(0), reminder: false });
     setForm({ name: "", category: "Vegetables", qty: "", expiry: isoFromDays(5) });
     addToast("Food added", "Your fridge tracker has been updated.");
   }
 
   function removeItem(itemId) {
-    setFoodItems((current) => current.filter((item) => item.id !== itemId));
+    onRemoveFoodItem(itemId);
     addToast("Item removed", "The food item was deleted from your tracker.");
   }
 
@@ -1473,7 +1518,7 @@ function MyFoodPage({ foodItems, setFoodItems, addToast }) {
   );
 }
 
-function RecipesPage({ foodItems, recipeSuggestions, setRecipeSuggestions, savedRecipes, setSavedRecipes, addToast }) {
+function RecipesPage({ foodItems, recipeSuggestions, setRecipeSuggestions, savedRecipes, onSaveRecipe, addToast }) {
   const [dragActive, setDragActive] = useState(false);
   const [uploadedFile, setUploadedFile] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1518,7 +1563,7 @@ function RecipesPage({ foodItems, recipeSuggestions, setRecipeSuggestions, saved
       addToast("Already saved", `${recipe.name} is already in your saved recipes.`);
       return;
     }
-    setSavedRecipes((current) => [recipe, ...current]);
+    onSaveRecipe(recipe);
     addToast("Recipe saved", `${recipe.name} was added to your recipe collection.`);
   }
 
@@ -1667,24 +1712,20 @@ function RecipesPage({ foodItems, recipeSuggestions, setRecipeSuggestions, saved
   );
 }
 
-function AlertsPage({ foodItems, setFoodItems, setMarketplaceListings, addToast }) {
+function AlertsPage({ foodItems, onToggleReminder, onMarkFoodAsUsed, onDonateFoodToMarketplace, addToast }) {
   const alerts = [...foodItems].sort((a, b) => new Date(a.expiry) - new Date(b.expiry));
 
   function toggleReminder(itemId) {
-    setFoodItems((current) => current.map((item) => (item.id === itemId ? { ...item, reminder: !item.reminder } : item)));
+    onToggleReminder(itemId);
   }
 
   function markAsUsed(itemId) {
-    setFoodItems((current) => current.filter((item) => item.id !== itemId));
+    onMarkFoodAsUsed(itemId);
     addToast("Marked as used", "Great job preventing extra food waste.");
   }
 
   function donateToMarketplace(item) {
-    setMarketplaceListings((current) => [
-      { id: makeId("listing"), name: `${item.name} Bundle`, seller: "You", price: 0, distance: "0.5 km", expiry: "Today", pickup: "Tonight", isFree: true, saved: false },
-      ...current
-    ]);
-    setFoodItems((current) => current.filter((entry) => entry.id !== item.id));
+    onDonateFoodToMarketplace(item);
     addToast("Donated to marketplace", `${item.name} is now listed for local pickup.`);
   }
 
@@ -1722,7 +1763,7 @@ function AlertsPage({ foodItems, setFoodItems, setMarketplaceListings, addToast 
   );
 }
 
-function MarketplacePage({ foodItems, marketplaceListings, setMarketplaceListings, restaurantDeals, addToast }) {
+function MarketplacePage({ currentUser, foodItems, marketplaceListings, onCreateMarketplaceListing, onToggleSavedListing, restaurantDeals, addToast }) {
   const [listingFilter, setListingFilter] = useState("all");
   const [restaurantFilters, setRestaurantFilters] = useState({ distance: "all", cuisine: "all", discount: "all" });
   const [listingForm, setListingForm] = useState({ name: "", quantity: "", price: "", pickup: "", photo: "" });
@@ -1743,10 +1784,19 @@ function MarketplacePage({ foodItems, marketplaceListings, setMarketplaceListing
       return;
     }
     const priceNumber = Number(listingForm.price || 0);
-    setMarketplaceListings((current) => [
-      { id: makeId("listing"), name: listingForm.name.trim(), seller: "You", price: priceNumber, distance: "0.7 km", expiry: "Today", pickup: listingForm.pickup.trim(), isFree: priceNumber === 0, saved: false },
-      ...current
-    ]);
+    onCreateMarketplaceListing({
+      id: makeId("listing"),
+      name: listingForm.name.trim(),
+      seller: currentUser?.name || "You",
+      price: priceNumber,
+      distance: "0.7 km",
+      expiry: "Today",
+      pickup: listingForm.pickup.trim(),
+      isFree: priceNumber === 0,
+      saved: false,
+      quantity: listingForm.quantity.trim(),
+      photo: listingForm.photo || ""
+    });
     setListingForm({ name: "", quantity: "", price: "", pickup: "", photo: "" });
     addToast("Listing published", "Your food is now live in the marketplace.");
   }
@@ -1841,7 +1891,7 @@ function MarketplacePage({ foodItems, marketplaceListings, setMarketplaceListing
                   </div>
                   <div className="flex flex-col gap-3">
                     <GlowButton onClick={() => addToast("Contact started", `Message sent to ${listing.seller}.`)} className="bg-primary/15 text-white">Contact Seller</GlowButton>
-                    <GlowButton onClick={() => setMarketplaceListings((current) => current.map((item) => item.id === listing.id ? { ...item, saved: !item.saved } : item))} className="bg-white/5 text-white">
+                    <GlowButton onClick={() => onToggleSavedListing(listing.id)} className="bg-white/5 text-white">
                       <Heart size={16} className={listing.saved ? "fill-current text-rose-300" : ""} />
                       Save Listing
                     </GlowButton>
@@ -2163,14 +2213,21 @@ function DashboardShell({
   setCurrentTab,
   onLogout,
   workspaceProfile,
+  dataMode,
+  dataSyncing,
   foodItems,
-  setFoodItems,
+  onAddFoodItem,
+  onRemoveFoodItem,
+  onToggleReminder,
+  onMarkFoodAsUsed,
   recipeSuggestions,
   setRecipeSuggestions,
   savedRecipes,
-  setSavedRecipes,
+  onSaveRecipe,
   marketplaceListings,
-  setMarketplaceListings,
+  onCreateMarketplaceListing,
+  onToggleSavedListing,
+  onDonateFoodToMarketplace,
   restaurantDeals,
   savingsHistory,
   wasteBreakdown,
@@ -2213,6 +2270,9 @@ function DashboardShell({
             <div className="hidden items-center gap-3 lg:flex">
               <div className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-sm text-emerald-200">
                 {workspaceProfile.plan} plan
+              </div>
+              <div className={`rounded-full border px-4 py-2 text-sm ${dataSyncing ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-100" : dataMode === "live" ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-200" : dataMode === "cached" ? "border-amber-400/20 bg-amber-400/10 text-amber-100" : "border-white/10 bg-white/5 text-slate-300"}`}>
+                {dataSyncing ? "Syncing data" : dataMode === "live" ? "Live data" : dataMode === "cached" ? "Cached data" : "Demo data"}
               </div>
               <div className="flex items-center gap-3 rounded-full border border-white/10 bg-slate-950/40 px-3 py-2">
                 <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-200">
@@ -2260,6 +2320,9 @@ function DashboardShell({
                 <div className="mt-8 rounded-3xl border border-white/10 bg-white/5 p-4">
                   <p className="text-white">{currentUser.name}</p>
                   <p className="mt-1 text-sm text-slate-400">{currentUser.email}</p>
+                  <p className="mt-3 text-xs uppercase tracking-[0.24em] text-slate-500">
+                    {dataSyncing ? "Syncing data" : dataMode === "live" ? "Live data" : dataMode === "cached" ? "Cached data" : "Demo data"}
+                  </p>
                 </div>
                 <GlowButton onClick={onLogout} className="mt-6 w-full justify-center bg-white/5 text-white">
                   <LogOut size={16} />
@@ -2274,10 +2337,10 @@ function DashboardShell({
           <AnimatePresence mode="wait">
             {currentTab === "dashboard" ? <DashboardHome key="dashboard-tab" currentUser={currentUser} foodItems={foodItems} savingsHistory={savingsHistory} wasteBreakdown={wasteBreakdown} savedRecipes={savedRecipes} marketplaceListings={marketplaceListings} workspaceProfile={workspaceProfile} /> : null}
             {currentTab === "insights" ? <AIStudioPage key="insights-tab" currentUser={currentUser} foodItems={foodItems} marketplaceListings={marketplaceListings} savingsHistory={savingsHistory} savedRecipes={savedRecipes} workspaceProfile={workspaceProfile} setRecipeSuggestions={setRecipeSuggestions} addToast={addToast} /> : null}
-            {currentTab === "food" ? <MyFoodPage key="food-tab" foodItems={foodItems} setFoodItems={setFoodItems} addToast={addToast} /> : null}
-            {currentTab === "recipes" ? <RecipesPage key="recipes-tab" foodItems={foodItems} recipeSuggestions={recipeSuggestions} setRecipeSuggestions={setRecipeSuggestions} savedRecipes={savedRecipes} setSavedRecipes={setSavedRecipes} addToast={addToast} /> : null}
-            {currentTab === "marketplace" ? <MarketplacePage key="marketplace-tab" foodItems={foodItems} marketplaceListings={marketplaceListings} setMarketplaceListings={setMarketplaceListings} restaurantDeals={restaurantDeals} addToast={addToast} /> : null}
-            {currentTab === "alerts" ? <AlertsPage key="alerts-tab" foodItems={foodItems} setFoodItems={setFoodItems} setMarketplaceListings={setMarketplaceListings} addToast={addToast} /> : null}
+            {currentTab === "food" ? <MyFoodPage key="food-tab" foodItems={foodItems} onAddFoodItem={onAddFoodItem} onRemoveFoodItem={onRemoveFoodItem} addToast={addToast} /> : null}
+            {currentTab === "recipes" ? <RecipesPage key="recipes-tab" foodItems={foodItems} recipeSuggestions={recipeSuggestions} setRecipeSuggestions={setRecipeSuggestions} savedRecipes={savedRecipes} onSaveRecipe={onSaveRecipe} addToast={addToast} /> : null}
+            {currentTab === "marketplace" ? <MarketplacePage key="marketplace-tab" currentUser={currentUser} foodItems={foodItems} marketplaceListings={marketplaceListings} onCreateMarketplaceListing={onCreateMarketplaceListing} onToggleSavedListing={onToggleSavedListing} restaurantDeals={restaurantDeals} addToast={addToast} /> : null}
+            {currentTab === "alerts" ? <AlertsPage key="alerts-tab" foodItems={foodItems} onToggleReminder={onToggleReminder} onMarkFoodAsUsed={onMarkFoodAsUsed} onDonateFoodToMarketplace={onDonateFoodToMarketplace} addToast={addToast} /> : null}
           </AnimatePresence>
         </main>
       </div>
@@ -2493,9 +2556,8 @@ function App() {
   const [foodItems, setFoodItems] = useLocalStorageState("freshmind-food-items", seedFoodItems);
   const [savedRecipes, setSavedRecipes] = useLocalStorageState("freshmind-saved-recipes", seedSavedRecipes);
   const [marketplaceListings, setMarketplaceListings] = useLocalStorageState("freshmind-marketplace-listings", seedListings);
-  const [restaurantDeals] = useLocalStorageState("freshmind-restaurant-deals", seedRestaurantDeals);
-  const [savingsHistory] = useLocalStorageState("freshmind-savings-history", seedSavingsHistory);
-  const [wasteBreakdown] = useLocalStorageState("freshmind-waste-breakdown", seedWasteBreakdown);
+  const [restaurantDeals, setRestaurantDeals] = useLocalStorageState("freshmind-restaurant-deals", seedRestaurantDeals);
+  const [savingsHistory, setSavingsHistory] = useLocalStorageState("freshmind-savings-history", seedSavingsHistory);
   const [workspaceProfile, setWorkspaceProfile] = useLocalStorageState("freshmind-workspace-profile", seedWorkspaceProfile);
   const [recipeSuggestions, setRecipeSuggestions] = useLocalStorageState("freshmind-recipe-suggestions", []);
   const [page, setPage] = useState(() => (currentUser ? "dashboard" : "landing"));
@@ -2507,8 +2569,12 @@ function App() {
     liveRecipes: false,
     liveBilling: false,
     liveAuth: false,
-    liveWorkspace: false
+    liveWorkspace: false,
+    liveAppData: false
   });
+  const [dataMode, setDataMode] = useState("demo");
+  const [dataSyncing, setDataSyncing] = useState(false);
+  const wasteBreakdown = useMemo(() => buildWasteBreakdown(foodItems), [foodItems]);
 
   useEffect(() => {
     if (currentUser && page !== "dashboard") setPage("dashboard");
@@ -2525,7 +2591,8 @@ function App() {
             liveRecipes: false,
             liveBilling: false,
             liveAuth: false,
-            liveWorkspace: false
+            liveWorkspace: false,
+            liveAppData: false
           });
         }
       } catch {
@@ -2562,15 +2629,14 @@ function App() {
 
         setCurrentUser(nextUser);
 
-        if (authCapabilities.liveWorkspace) {
-          const workspacePayload = await fetchServerWorkspace(authSession.access_token);
-          if (!cancelled && workspacePayload.workspace) {
-            setWorkspaceProfile(workspacePayload.workspace);
-          }
+        if (!cancelled) {
+          await hydrateWorkspaceAndAppData(authSession.access_token);
         }
       } catch {
         if (!cancelled) {
           setAuthSession(null);
+          setCurrentUser(null);
+          setDataMode("demo");
         }
       }
     }
@@ -2579,7 +2645,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [authCapabilities.liveAuth, authCapabilities.liveWorkspace, authSession]);
+  }, [authCapabilities.liveAuth, authCapabilities.liveWorkspace, authCapabilities.liveAppData, authSession]);
 
   useEffect(() => {
     const search = new URLSearchParams(window.location.search);
@@ -2613,6 +2679,114 @@ function App() {
     setToasts((current) => current.filter((toast) => toast.id !== id));
   }
 
+  function applyAppDataSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") {
+      return;
+    }
+
+    if ("foodItems" in snapshot) setFoodItems(snapshot.foodItems || []);
+    if ("savedRecipes" in snapshot) setSavedRecipes(snapshot.savedRecipes || []);
+    if ("marketplaceListings" in snapshot) setMarketplaceListings(snapshot.marketplaceListings || []);
+    if ("restaurantDeals" in snapshot) setRestaurantDeals(snapshot.restaurantDeals || []);
+    if ("savingsHistory" in snapshot) setSavingsHistory(snapshot.savingsHistory || []);
+  }
+
+  function buildAppDataSnapshot(overrides = {}) {
+    return {
+      foodItems: overrides.foodItems ?? foodItems,
+      savedRecipes: overrides.savedRecipes ?? savedRecipes,
+      marketplaceListings: overrides.marketplaceListings ?? marketplaceListings,
+      savingsHistory: overrides.savingsHistory ?? savingsHistory
+    };
+  }
+
+  function loadPrototypeDataset() {
+    setFoodItems(seedFoodItems());
+    setSavedRecipes(seedSavedRecipes());
+    setMarketplaceListings(seedListings());
+    setRestaurantDeals(seedRestaurantDeals());
+    setSavingsHistory(seedSavingsHistory());
+    setWorkspaceProfile(seedWorkspaceProfile());
+    setRecipeSuggestions([]);
+    setDataMode("demo");
+  }
+
+  async function persistLiveAppData(snapshot, options = {}) {
+    const nextSnapshot = buildAppDataSnapshot(snapshot);
+    applyAppDataSnapshot(nextSnapshot);
+
+    if (!authCapabilities.liveAppData || !authSession?.access_token) {
+      setDataMode("demo");
+      return;
+    }
+
+    setDataSyncing(true);
+    try {
+      const payload = await syncServerAppData(authSession.access_token, nextSnapshot);
+      if (payload.mode === "live" && payload.data) {
+        applyAppDataSnapshot(payload.data);
+        setDataMode("live");
+      }
+    } catch {
+      setDataMode("cached");
+      if (!options.silent) {
+        addToast("Sync delayed", "FreshMind saved your changes locally and will retry live sync next session.");
+      }
+    } finally {
+      setDataSyncing(false);
+    }
+  }
+
+  async function hydrateWorkspaceAndAppData(accessToken) {
+    if (authCapabilities.liveWorkspace) {
+      try {
+        const workspacePayload = await fetchServerWorkspace(accessToken);
+        if (workspacePayload.workspace) {
+          setWorkspaceProfile(workspacePayload.workspace);
+        }
+      } catch {
+        // Keep workspace fallback in place.
+      }
+    }
+
+    if (!authCapabilities.liveAppData) {
+      setDataMode("demo");
+      return;
+    }
+
+    setDataSyncing(true);
+    try {
+      const appDataPayload = await fetchServerAppData(accessToken);
+      if (appDataPayload.mode !== "live" || !appDataPayload.data) {
+        setDataMode("demo");
+        return;
+      }
+
+      const hasPersistedData = [
+        appDataPayload.data.foodItems,
+        appDataPayload.data.savedRecipes,
+        appDataPayload.data.marketplaceListings,
+        appDataPayload.data.savingsHistory
+      ].some((collection) => Array.isArray(collection) && collection.length);
+
+      if (!hasPersistedData) {
+        const bootstrapPayload = await syncServerAppData(accessToken, buildAppDataSnapshot());
+        if (bootstrapPayload.mode === "live" && bootstrapPayload.data) {
+          applyAppDataSnapshot(bootstrapPayload.data);
+          setDataMode("live");
+          return;
+        }
+      }
+
+      applyAppDataSnapshot(appDataPayload.data);
+      setDataMode("live");
+    } catch {
+      setDataMode("cached");
+    } finally {
+      setDataSyncing(false);
+    }
+  }
+
   function openAuth(mode = "signup") {
     setAuthMode(mode);
     setAuthError("");
@@ -2628,6 +2802,7 @@ function App() {
 
   function handleDemo() {
     setAuthSession(null);
+    loadPrototypeDataset();
     loginAs(demoUser());
     addToast("Demo loaded", "You are now inside the FreshMind demo account.");
   }
@@ -2666,14 +2841,11 @@ function App() {
             setAuthSession(payload.session);
           }
           loginAs({ id: payload.user.id, name: payload.user.name, email: payload.user.email, joined: isoFromDays(0) });
-          if (payload.session && authCapabilities.liveWorkspace) {
+          if (payload.session && (authCapabilities.liveWorkspace || authCapabilities.liveAppData)) {
             try {
-              const workspacePayload = await fetchServerWorkspace(payload.session.access_token);
-              if (workspacePayload.workspace) {
-                setWorkspaceProfile(workspacePayload.workspace);
-              }
+              await hydrateWorkspaceAndAppData(payload.session.access_token);
             } catch {
-              // Keep default workspace fallback.
+              // Keep seeded fallback data if live hydration fails.
             }
           }
           addToast("Account created", "Your Supabase account is live.");
@@ -2690,14 +2862,11 @@ function App() {
           setAuthSession(payload.session);
         }
         loginAs({ id: payload.user.id, name: payload.user.name, email: payload.user.email, joined: isoFromDays(0) });
-        if (payload.session && authCapabilities.liveWorkspace) {
+        if (payload.session && (authCapabilities.liveWorkspace || authCapabilities.liveAppData)) {
           try {
-            const workspacePayload = await fetchServerWorkspace(payload.session.access_token);
-            if (workspacePayload.workspace) {
-              setWorkspaceProfile(workspacePayload.workspace);
-            }
+            await hydrateWorkspaceAndAppData(payload.session.access_token);
           } catch {
-            // Keep default workspace fallback.
+            // Keep seeded fallback data if live hydration fails.
           }
         }
         addToast("Welcome back", "Your secure workspace session is ready.");
@@ -2737,6 +2906,7 @@ function App() {
   function handleLogout() {
     setAuthSession(null);
     setCurrentUser(null);
+    loadPrototypeDataset();
     setPage("landing");
     setCurrentTab("dashboard");
     addToast("Logged out", "Your FreshMind session has been cleared.");
@@ -2744,6 +2914,72 @@ function App() {
 
   function handleDownload() {
     addToast("Mobile app coming soon", "FreshMind for iOS and Android is on the roadmap.");
+  }
+
+  function handleAddFoodItem(item) {
+    persistLiveAppData({
+      foodItems: [item, ...foodItems]
+    });
+  }
+
+  function handleRemoveFoodItem(itemId) {
+    persistLiveAppData({
+      foodItems: foodItems.filter((item) => item.id !== itemId)
+    });
+  }
+
+  function handleToggleReminder(itemId) {
+    persistLiveAppData({
+      foodItems: foodItems.map((item) => (item.id === itemId ? { ...item, reminder: !item.reminder } : item))
+    }, { silent: true });
+  }
+
+  function handleMarkFoodAsUsed(itemId) {
+    persistLiveAppData({
+      foodItems: foodItems.filter((item) => item.id !== itemId)
+    });
+  }
+
+  function handleDonateFoodToMarketplace(item) {
+    persistLiveAppData({
+      foodItems: foodItems.filter((entry) => entry.id !== item.id),
+      marketplaceListings: [
+        {
+          id: makeId("listing"),
+          name: `${item.name} Bundle`,
+          seller: currentUser?.name || "You",
+          price: 0,
+          distance: "0.5 km",
+          expiry: "Today",
+          pickup: "Tonight",
+          isFree: true,
+          saved: false,
+          quantity: item.qty,
+          photo: ""
+        },
+        ...marketplaceListings
+      ]
+    });
+  }
+
+  function handleSaveRecipe(recipe) {
+    persistLiveAppData({
+      savedRecipes: [recipe, ...savedRecipes]
+    });
+  }
+
+  function handleCreateMarketplaceListing(listing) {
+    persistLiveAppData({
+      marketplaceListings: [listing, ...marketplaceListings]
+    });
+  }
+
+  function handleToggleSavedListing(listingId) {
+    persistLiveAppData({
+      marketplaceListings: marketplaceListings.map((listing) => (
+        listing.id === listingId ? { ...listing, saved: !listing.saved } : listing
+      ))
+    }, { silent: true });
   }
 
   const activeView = useMemo(() => {
@@ -2755,14 +2991,21 @@ function App() {
           setCurrentTab={setCurrentTab}
           onLogout={handleLogout}
           workspaceProfile={workspaceProfile}
+          dataMode={dataMode}
+          dataSyncing={dataSyncing}
           foodItems={foodItems}
-          setFoodItems={setFoodItems}
+          onAddFoodItem={handleAddFoodItem}
+          onRemoveFoodItem={handleRemoveFoodItem}
+          onToggleReminder={handleToggleReminder}
+          onMarkFoodAsUsed={handleMarkFoodAsUsed}
           recipeSuggestions={recipeSuggestions}
           setRecipeSuggestions={setRecipeSuggestions}
           savedRecipes={savedRecipes}
-          setSavedRecipes={setSavedRecipes}
+          onSaveRecipe={handleSaveRecipe}
           marketplaceListings={marketplaceListings}
-          setMarketplaceListings={setMarketplaceListings}
+          onCreateMarketplaceListing={handleCreateMarketplaceListing}
+          onToggleSavedListing={handleToggleSavedListing}
+          onDonateFoodToMarketplace={handleDonateFoodToMarketplace}
           restaurantDeals={restaurantDeals}
           savingsHistory={savingsHistory}
           wasteBreakdown={wasteBreakdown}
@@ -2776,7 +3019,7 @@ function App() {
     }
 
     return <LandingPage onGetStarted={() => openAuth("signup")} onTryDemo={handleDemo} onDownload={handleDownload} onOpenAuth={() => openAuth("login")} />;
-  }, [authCapabilities, authError, authMode, currentTab, currentUser, foodItems, marketplaceListings, page, recipeSuggestions, restaurantDeals, savedRecipes, savingsHistory, wasteBreakdown, workspaceProfile]);
+  }, [authCapabilities, authError, authMode, currentTab, currentUser, dataMode, dataSyncing, foodItems, marketplaceListings, page, recipeSuggestions, restaurantDeals, savedRecipes, savingsHistory, wasteBreakdown, workspaceProfile]);
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-ink text-white">

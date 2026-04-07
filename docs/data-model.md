@@ -82,11 +82,9 @@ Short-term:
 - use Supabase only when env vars are present
 
 Next implementation step:
-- add API routes for:
-  - `food_items`
-  - `recipes`
-  - `marketplace_listings`
-  - `savings_snapshots`
+- use the authenticated sync surface in [api/app-data.js](C:\Users\Ayush%20Rawat\Documents\New%20project\api\app-data.js)
+- keep the current replace-all sync model for MVP speed and simple rollback
+- split it into per-entity routes later if you want finer-grained collaboration and audit trails
 
 Then in the frontend:
 - hydrate from API on login
