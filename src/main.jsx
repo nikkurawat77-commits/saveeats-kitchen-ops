@@ -492,6 +492,70 @@ async function fetchRuntimeConfig() {
   return response.json();
 }
 
+async function signUpWithServerAuth(form) {
+  const response = await fetch("/api/auth/signup", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(form)
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.detail || payload.error || "Signup failed");
+  }
+
+  return payload;
+}
+
+async function signInWithServerAuth(form) {
+  const response = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(form)
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.detail || payload.error || "Login failed");
+  }
+
+  return payload;
+}
+
+async function validateServerSession(accessToken) {
+  const response = await fetch("/api/auth/session", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.detail || payload.error || "Session validation failed");
+  }
+
+  return payload;
+}
+
+async function fetchServerWorkspace(accessToken) {
+  const response = await fetch("/api/workspace", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.detail || payload.error || "Workspace fetch failed");
+  }
+
+  return payload;
+}
+
 function AnimatedCounter({ value, prefix = "", suffix = "", decimals = 0 }) {
   const ref = useRef(null);
   const inView = useInView(ref, { once: true, amount: 0.6 });
@@ -976,7 +1040,7 @@ function LandingPage({ onGetStarted, onTryDemo, onDownload, onOpenAuth }) {
   );
 }
 
-function AuthPage({ authMode, setAuthMode, onBack, onAuthSubmit, onTryDemo, onGoogle, errorMessage }) {
+function AuthPage({ authMode, setAuthMode, onBack, onAuthSubmit, onTryDemo, onGoogle, errorMessage, authCapabilities }) {
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
   const [shakeKey, setShakeKey] = useState(0);
@@ -1007,6 +1071,10 @@ function AuthPage({ authMode, setAuthMode, onBack, onAuthSubmit, onTryDemo, onGo
             <p className="text-sm uppercase tracking-[0.35em] text-emerald-300">FreshMind Access</p>
             <h1 className="mt-4 font-display text-5xl font-bold text-white sm:text-6xl">Build a smarter kitchen routine in minutes.</h1>
             <p className="mt-6 max-w-xl text-lg leading-8 text-slate-300">Login or create your account to unlock AI recipe suggestions, savings analytics, marketplace tools, and expiry alerts.</p>
+            <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-300">
+              <span className={`h-2.5 w-2.5 rounded-full ${authCapabilities.liveAuth ? "bg-emerald-400" : "bg-amber-400"}`} />
+              {authCapabilities.liveAuth ? "Supabase auth is live" : "Prototype auth fallback"}
+            </div>
             <div className="mt-10 grid gap-4 sm:grid-cols-3">
               {[
                 ["24 items", "Tracked instantly"],
@@ -2421,23 +2489,97 @@ class AppErrorBoundary extends React.Component {
 function App() {
   const [users, setUsers] = useLocalStorageState("freshmind-users", () => [demoUser()]);
   const [currentUser, setCurrentUser] = useLocalStorageState("freshmind-current-user", null);
+  const [authSession, setAuthSession] = useLocalStorageState("freshmind-auth-session", null);
   const [foodItems, setFoodItems] = useLocalStorageState("freshmind-food-items", seedFoodItems);
   const [savedRecipes, setSavedRecipes] = useLocalStorageState("freshmind-saved-recipes", seedSavedRecipes);
   const [marketplaceListings, setMarketplaceListings] = useLocalStorageState("freshmind-marketplace-listings", seedListings);
   const [restaurantDeals] = useLocalStorageState("freshmind-restaurant-deals", seedRestaurantDeals);
   const [savingsHistory] = useLocalStorageState("freshmind-savings-history", seedSavingsHistory);
   const [wasteBreakdown] = useLocalStorageState("freshmind-waste-breakdown", seedWasteBreakdown);
-  const [workspaceProfile] = useLocalStorageState("freshmind-workspace-profile", seedWorkspaceProfile);
+  const [workspaceProfile, setWorkspaceProfile] = useLocalStorageState("freshmind-workspace-profile", seedWorkspaceProfile);
   const [recipeSuggestions, setRecipeSuggestions] = useLocalStorageState("freshmind-recipe-suggestions", []);
   const [page, setPage] = useState(() => (currentUser ? "dashboard" : "landing"));
   const [authMode, setAuthMode] = useState("signup");
   const [authError, setAuthError] = useState("");
   const [currentTab, setCurrentTab] = useState("dashboard");
   const [toasts, setToasts] = useState([]);
+  const [authCapabilities, setAuthCapabilities] = useState({
+    liveRecipes: false,
+    liveBilling: false,
+    liveAuth: false,
+    liveWorkspace: false
+  });
 
   useEffect(() => {
     if (currentUser && page !== "dashboard") setPage("dashboard");
   }, [currentUser, page]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCapabilities() {
+      try {
+        const payload = await fetchRuntimeConfig();
+        if (!cancelled) {
+          setAuthCapabilities(payload.capabilities || {
+            liveRecipes: false,
+            liveBilling: false,
+            liveAuth: false,
+            liveWorkspace: false
+          });
+        }
+      } catch {
+        // Keep fallback capability defaults.
+      }
+    }
+
+    loadCapabilities();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateServerSession() {
+      if (!authCapabilities.liveAuth || !authSession || !authSession.access_token) {
+        return;
+      }
+
+      try {
+        const sessionPayload = await validateServerSession(authSession.access_token);
+        if (cancelled) {
+          return;
+        }
+
+        const nextUser = {
+          id: sessionPayload.user.id,
+          name: sessionPayload.user.name,
+          email: sessionPayload.user.email,
+          joined: currentUser && currentUser.joined ? currentUser.joined : isoFromDays(0)
+        };
+
+        setCurrentUser(nextUser);
+
+        if (authCapabilities.liveWorkspace) {
+          const workspacePayload = await fetchServerWorkspace(authSession.access_token);
+          if (!cancelled && workspacePayload.workspace) {
+            setWorkspaceProfile(workspacePayload.workspace);
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setAuthSession(null);
+        }
+      }
+    }
+
+    hydrateServerSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [authCapabilities.liveAuth, authCapabilities.liveWorkspace, authSession]);
 
   useEffect(() => {
     const search = new URLSearchParams(window.location.search);
@@ -2478,18 +2620,19 @@ function App() {
   }
 
   function loginAs(user) {
-    setCurrentUser({ name: user.name, email: user.email, joined: user.joined || isoFromDays(0) });
+    setCurrentUser({ id: user.id || null, name: user.name, email: user.email, joined: user.joined || isoFromDays(0) });
     setCurrentTab("dashboard");
     setPage("dashboard");
     setAuthError("");
   }
 
   function handleDemo() {
+    setAuthSession(null);
     loginAs(demoUser());
     addToast("Demo loaded", "You are now inside the FreshMind demo account.");
   }
 
-  function handleAuthSubmit(form) {
+  async function handleAuthSubmit(form) {
     const email = form.email.trim().toLowerCase();
     const password = form.password.trim();
     const name = form.name.trim();
@@ -2501,6 +2644,68 @@ function App() {
     if (password.length < 6) {
       setAuthError("Passwords must be at least 6 characters long.");
       return;
+    }
+
+    if (authCapabilities.liveAuth) {
+      try {
+        if (authMode === "signup") {
+          const payload = await signUpWithServerAuth({ name, email, password });
+
+          if (payload.mode === "demo") {
+            setAuthError(payload.message || "Live auth is not configured yet.");
+            return;
+          }
+
+          if (payload.needsEmailVerification) {
+            addToast("Verify your email", "Supabase created your account. Verify your inbox, then sign in.");
+            setAuthMode("login");
+            return;
+          }
+
+          if (payload.session) {
+            setAuthSession(payload.session);
+          }
+          loginAs({ id: payload.user.id, name: payload.user.name, email: payload.user.email, joined: isoFromDays(0) });
+          if (payload.session && authCapabilities.liveWorkspace) {
+            try {
+              const workspacePayload = await fetchServerWorkspace(payload.session.access_token);
+              if (workspacePayload.workspace) {
+                setWorkspaceProfile(workspacePayload.workspace);
+              }
+            } catch {
+              // Keep default workspace fallback.
+            }
+          }
+          addToast("Account created", "Your Supabase account is live.");
+          return;
+        }
+
+        const payload = await signInWithServerAuth({ email, password });
+        if (payload.mode === "demo") {
+          setAuthError(payload.message || "Live auth is not configured yet.");
+          return;
+        }
+
+        if (payload.session) {
+          setAuthSession(payload.session);
+        }
+        loginAs({ id: payload.user.id, name: payload.user.name, email: payload.user.email, joined: isoFromDays(0) });
+        if (payload.session && authCapabilities.liveWorkspace) {
+          try {
+            const workspacePayload = await fetchServerWorkspace(payload.session.access_token);
+            if (workspacePayload.workspace) {
+              setWorkspaceProfile(workspacePayload.workspace);
+            }
+          } catch {
+            // Keep default workspace fallback.
+          }
+        }
+        addToast("Welcome back", "Your secure workspace session is ready.");
+        return;
+      } catch (error) {
+        setAuthError(error.message || "Authentication failed.");
+        return;
+      }
     }
 
     if (authMode === "signup") {
@@ -2530,6 +2735,7 @@ function App() {
   }
 
   function handleLogout() {
+    setAuthSession(null);
     setCurrentUser(null);
     setPage("landing");
     setCurrentTab("dashboard");
@@ -2566,11 +2772,11 @@ function App() {
     }
 
     if (page === "auth") {
-      return <AuthPage authMode={authMode} setAuthMode={setAuthMode} onBack={() => setPage("landing")} onAuthSubmit={handleAuthSubmit} onTryDemo={handleDemo} onGoogle={handleGoogle} errorMessage={authError} />;
+      return <AuthPage authMode={authMode} setAuthMode={setAuthMode} onBack={() => setPage("landing")} onAuthSubmit={handleAuthSubmit} onTryDemo={handleDemo} onGoogle={handleGoogle} errorMessage={authError} authCapabilities={authCapabilities} />;
     }
 
     return <LandingPage onGetStarted={() => openAuth("signup")} onTryDemo={handleDemo} onDownload={handleDownload} onOpenAuth={() => openAuth("login")} />;
-  }, [authError, authMode, currentTab, currentUser, foodItems, marketplaceListings, page, recipeSuggestions, restaurantDeals, savedRecipes, savingsHistory, wasteBreakdown, workspaceProfile]);
+  }, [authCapabilities, authError, authMode, currentTab, currentUser, foodItems, marketplaceListings, page, recipeSuggestions, restaurantDeals, savedRecipes, savingsHistory, wasteBreakdown, workspaceProfile]);
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-ink text-white">

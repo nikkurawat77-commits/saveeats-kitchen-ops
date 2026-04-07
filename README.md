@@ -4,12 +4,13 @@ FreshMind is a polished SaaS-style React product for AI-powered kitchen tracking
 
 Live product areas include:
 - startup-grade landing page with Framer Motion product storytelling
-- login and signup with localStorage session handling
+- login and signup with Supabase-ready server auth plus local fallback
 - food tracker with expiry states and swipe-to-delete interactions
 - AI Studio workspace with kitchen health scoring, smart actions, demand forecasting, and marketplace pricing guidance
 - server-backed AI recipe generation via `/api/recipes`
 - server-backed forecast intelligence via `/api/forecast`
 - Stripe-ready billing flow via `/api/billing-checkout`
+- session validation via `/api/auth/*` and workspace persistence via `/api/workspace`
 - savings analytics and custom SVG product charts
 - leftover marketplace and nearby restaurant deals
 - mobile-ready install metadata via web manifest and app icons
@@ -51,6 +52,24 @@ FreshMind includes a Stripe-ready checkout endpoint. To enable live billing, set
 
 Without those env vars, the billing UI still works in demo mode and explains what is missing.
 
+## Supabase Auth Setup
+
+FreshMind now supports a production-shaped auth flow through:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_WORKSPACE_TABLE` (optional, defaults to `workspace_profiles`)
+
+When Supabase env vars are present, the frontend uses:
+
+- `/api/auth/signup`
+- `/api/auth/login`
+- `/api/auth/session`
+- `/api/workspace`
+
+Without those env vars, FreshMind automatically falls back to the local prototype auth path.
+
 ## Project Structure
 
 - `src/main.jsx` contains the main product app
@@ -58,6 +77,8 @@ Without those env vars, the billing UI still works in demo mode and explains wha
 - `api/forecast.js` powers server-side forecasting and operational insights
 - `api/billing-checkout.js` powers Stripe-ready billing sessions
 - `api/config.js` exposes backend capability flags to the frontend
+- `api/auth/` contains Supabase-backed signup, login, and session validation
+- `api/workspace.js` handles workspace profile hydration and persistence
 - `lib/server/` contains shared server helpers
 - `index.html` provides the Vite entry shell, fonts, and Tailwind config
 - `vite.config.js` adds React support and bundle chunking
@@ -65,7 +86,7 @@ Without those env vars, the billing UI still works in demo mode and explains wha
 
 ## Notes
 
-- Authentication is localStorage-based for product prototyping.
+- Authentication now supports Supabase-backed sessions when env vars are configured, with local fallback for prototype use.
 - Recipe generation, forecasting, and billing now have server-side API surfaces so the app is closer to a real SaaS architecture.
-- `SUPABASE_URL` and `SUPABASE_ANON_KEY` are documented for the next auth upgrade step, even though the current frontend session flow is still localStorage-based.
+- Workspace persistence uses Supabase when `SUPABASE_SERVICE_ROLE_KEY` is available, otherwise it stays in demo mode.
 - The app is fully responsive and designed to be portfolio-ready.
