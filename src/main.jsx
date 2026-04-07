@@ -253,19 +253,27 @@ function seedWasteBreakdown() {
 
 function useLocalStorageState(key, initialValue) {
   const [value, setValue] = useState(() => {
-    const stored = window.localStorage.getItem(key);
-    if (stored) {
-      try {
-        return JSON.parse(stored);
-      } catch {
-        return typeof initialValue === "function" ? initialValue() : initialValue;
+    try {
+      const stored = window.localStorage.getItem(key);
+      if (stored) {
+        try {
+          return JSON.parse(stored);
+        } catch {
+          return typeof initialValue === "function" ? initialValue() : initialValue;
+        }
       }
+    } catch {
+      return typeof initialValue === "function" ? initialValue() : initialValue;
     }
     return typeof initialValue === "function" ? initialValue() : initialValue;
   });
 
   useEffect(() => {
-    window.localStorage.setItem(key, JSON.stringify(value));
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // Ignore storage write failures in locked-down browsers/private mode.
+    }
   }, [key, value]);
 
   return [value, setValue];
@@ -1711,6 +1719,63 @@ function DashboardShell({
   );
 }
 
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, message: "" };
+  }
+
+  static getDerivedStateFromError(error) {
+    return {
+      hasError: true,
+      message: error?.message || "Unexpected application error"
+    };
+  }
+
+  componentDidCatch(error) {
+    console.error("FreshMind runtime error:", error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-ink px-4 text-white">
+          <div className="w-full max-w-2xl rounded-[32px] border border-white/10 bg-white/5 p-8 text-center backdrop-blur-xl">
+            <p className="text-sm uppercase tracking-[0.3em] text-amber-300">FreshMind Recovery</p>
+            <h1 className="mt-4 font-display text-4xl text-white">The app hit a runtime error.</h1>
+            <p className="mt-4 text-base leading-7 text-slate-300">
+              Refresh the page once. If it still happens, clear this site&apos;s storage and reopen FreshMind.
+            </p>
+            <p className="mt-6 rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 font-mono text-sm text-amber-100">
+              {this.state.message}
+            </p>
+            <div className="mt-6 flex flex-wrap justify-center gap-3">
+              <GlowButton onClick={() => window.location.reload()} className="bg-primary/20 text-white shadow-glow">
+                Reload App
+              </GlowButton>
+              <GlowButton
+                onClick={() => {
+                  try {
+                    window.localStorage.clear();
+                  } catch {
+                    // Ignore storage errors and still reload.
+                  }
+                  window.location.reload();
+                }}
+                className="bg-white/5 text-white"
+              >
+                Reset Local Data
+              </GlowButton>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 function App() {
   const [users, setUsers] = useLocalStorageState("freshmind-users", () => [demoUser()]);
   const [currentUser, setCurrentUser] = useLocalStorageState("freshmind-current-user", null);
@@ -1853,6 +1918,8 @@ function App() {
 
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <App />
+    <AppErrorBoundary>
+      <App />
+    </AppErrorBoundary>
   </React.StrictMode>
 );
