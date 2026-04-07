@@ -74,6 +74,8 @@ Without those env vars, FreshMind automatically falls back to the local prototyp
 Production SQL and deployment handoff:
 
 - [workspace_profiles.sql](C:\Users\Ayush%20Rawat\Documents\New%20project\supabase\workspace_profiles.sql)
+- [app_data_schema.sql](C:\Users\Ayush%20Rawat\Documents\New%20project\supabase\app_data_schema.sql)
+- [data-model.md](C:\Users\Ayush%20Rawat\Documents\New%20project\docs\data-model.md)
 - [production-setup.md](C:\Users\Ayush%20Rawat\Documents\New%20project\docs\production-setup.md)
 
 ## Project Structure
@@ -88,6 +90,8 @@ Production SQL and deployment handoff:
 - `api/workspace.js` handles workspace profile hydration and persistence
 - `lib/server/` contains shared server helpers
 - `supabase/workspace_profiles.sql` contains the production table, trigger, and RLS policies
+- `supabase/app_data_schema.sql` contains the production-ready app tables for food, recipes, listings, deals, and savings
+- `docs/data-model.md` maps the current frontend state to the production persistence model
 - `index.html` provides the Vite entry shell, fonts, and Tailwind config
 - `vite.config.js` adds React support and bundle chunking
 - `public/manifest.webmanifest` makes the app install-ready
@@ -97,5 +101,6 @@ Production SQL and deployment handoff:
 - Authentication now supports Supabase-backed sessions when env vars are configured, with local fallback for prototype use.
 - Recipe generation, forecasting, and billing now have server-side API surfaces so the app is closer to a real SaaS architecture.
 - Workspace persistence uses Supabase when `SUPABASE_SERVICE_ROLE_KEY` is available, otherwise it stays in demo mode.
+- The Supabase SQL files now cover both account data and the main product entities, so the app is ready for a real database-backed migration path.
 - `/api/health` is available for uptime checks and quick deployment verification.
 - The app is fully responsive and designed to be portfolio-ready.
